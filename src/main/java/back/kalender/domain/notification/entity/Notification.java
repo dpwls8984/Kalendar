@@ -35,6 +35,9 @@ public class Notification extends BaseEntity {
     @Column(name = "application_id")
     private Long applicationId;
 
+    @Column(name = "is_deleted", nullable = false, columnDefinition = "boolean default false")
+    private boolean isDeleted = false;
+
     public Notification(Long userId, NotificationType notificationType, String title, String content, Long partyId, Long applicationId) {
         this.userId = userId;
         this.notificationType = notificationType;
@@ -47,5 +50,9 @@ public class Notification extends BaseEntity {
 
     public void markAsRead() {
         this.isRead = true;
+    }
+
+    public void delete() {
+        this.isDeleted = true;
     }
 }

@@ -39,11 +39,11 @@ public class PerformanceBaseInitData implements ApplicationRunner {
     );
 
     private static final Map<String, String> PERFORMANCE_POSTER_URL = Map.of(
-            "aespa", "https://wya-kalendar-poster-images-v1.s3.ap-northeast-2.amazonaws.com/aespa.png",
-            "BTS", "https://wya-kalendar-poster-images-v1.s3.ap-northeast-2.amazonaws.com/bts.png",
-            "fromis_9", "https://wya-kalendar-poster-images-v1.s3.ap-northeast-2.amazonaws.com/fromis9.png",
-            "G-DRAGON", "https://wya-kalendar-poster-images-v1.s3.ap-northeast-2.amazonaws.com/gdragon.png",
-            "NCT WISH", "https://wya-kalendar-poster-images-v1.s3.ap-northeast-2.amazonaws.com/nctwish.png"
+            "aespa", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/aespa.png",
+            "BTS", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/bts.png",
+            "fromis_9", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/fromis9.png",
+            "G-DRAGON", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/gdragon.png",
+            "NCT WISH", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/nctwish.png"
     );
 
     private static final LocalDate PERFORMANCE_START_DATE = LocalDate.of(2026, 1, 15);

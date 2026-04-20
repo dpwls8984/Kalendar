@@ -1,7 +1,9 @@
 package back.kalender.domain.party.service;
 
 import back.kalender.domain.chat.service.ChatRoomService;
+import back.kalender.domain.notification.entity.Notification;
 import back.kalender.domain.notification.enums.NotificationType;
+import back.kalender.domain.notification.repository.NotificationRepository;
 import back.kalender.domain.notification.service.NotificationService;
 import back.kalender.domain.party.dto.request.CreatePartyRequest;
 import back.kalender.domain.party.dto.request.UpdatePartyRequest;
@@ -50,6 +52,7 @@ public class PartyService {
     private final ScheduleRepository scheduleRepository;
     private final NotificationService notificationService;
     private final ChatRoomService chatRoomService;
+    private final NotificationRepository notificationRepository;
 
 
     @Transactional
@@ -277,11 +280,25 @@ public class PartyService {
         log.info("[신청 취소] partyId={}, applicationId={}, userId={}",
                 partyId, applicationId, currentUserId);
 
+        Party party = getPartyOrThrow(partyId);
         PartyApplication application = getApplicationOrThrow(applicationId);
         validateApplicantPermission(application, currentUserId);
         validateApplicationNotApproved(application);
 
-        partyApplicationRepository.delete(application);
+        application.cancel();
+
+        // 2. [추가] 방장에게 갔던 기존 '신청 알림'을 찾아서 소프트 딜리트 (목록에서 사라짐)
+        notificationRepository.findByApplicationIdAndNotificationType(applicationId, NotificationType.APPLY)
+                .ifPresent(Notification::delete);
+
+        notificationService.send(
+                party.getLeaderId(),        // 수신자: 방장
+                NotificationType.APPLY,     // 알림 타입
+                "파티 신청 취소",             // 제목
+                "신청자가 파티 신청을 취소했습니다.", // 내용
+                party.getId(),              // 파티 ID
+                application.getId()         // 신청서 ID
+        );
 
         log.info("[신청 취소 완료] partyId={}, applicationId={}", partyId, applicationId);
     }

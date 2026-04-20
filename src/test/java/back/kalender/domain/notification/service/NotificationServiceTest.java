@@ -105,7 +105,7 @@ class NotificationServiceTest {
 
         verify(notificationRepository, times(1)).save(any(Notification.class));
 
-        verify(emitterRepository, times(2)).saveEventCache(anyString(), any(Notification.class));
+        verify(emitterRepository, times(2)).saveEventCache(anyString(), any(NotificationResponse.class));
 
         verify(emitterRepository, times(1)).findAllEmitterStartWithByMemberId(String.valueOf(userId));
     }
@@ -123,7 +123,7 @@ class NotificationServiceTest {
         n2.markAsRead();
 
         Page<Notification> entityPage = new PageImpl<>(List.of(n1, n2));
-        given(notificationRepository.findAllByUserIdOrderByCreatedAtDesc(eq(userId), any()))
+        given(notificationRepository.findAllByUserIdAndIsDeletedFalseOrderByCreatedAtDesc(eq(userId), any()))
                 .willReturn(entityPage);
 
         Page<NotificationResponse> result = notificationService.getNotifications(userId, PageRequest.of(0, 10));
@@ -165,7 +165,7 @@ class NotificationServiceTest {
         PartyApplication mockApplication = mock(PartyApplication.class);
         given(mockApplication.getStatus()).willReturn(ApplicationStatus.APPROVED);
 
-        given(notificationRepository.findAllByUserIdOrderByCreatedAtDesc(eq(userId), any(Pageable.class)))
+        given(notificationRepository.findAllByUserIdAndIsDeletedFalseOrderByCreatedAtDesc(eq(userId), any(Pageable.class)))
                 .willReturn(new PageImpl<>(List.of(applyNotification)));
 
         given(partyApplicationRepository.findById(applicationId))

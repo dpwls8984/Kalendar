@@ -92,7 +92,7 @@ custom:
       password: ${REDIS_PASSWORD:}
 aws:
   s3:
-    bucket: wya-kalendar-profile-images-v1
+    bucket: wya-kalendar-profile-images-v2
     region: ap-northeast-2
     profile-prefix: profile/
     presign-expire-minutes: 10

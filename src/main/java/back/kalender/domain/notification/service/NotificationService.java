@@ -61,28 +61,34 @@ public class NotificationService {
 
         Map<String, SseEmitter> emitters = emitterRepository.findAllEmitterStartWithByMemberId(receiverIdStr);
 
-        emitters.forEach((key, emitter) -> {
-            emitterRepository.saveEventCache(key, notification);
+        String status = null;
+        if (type == NotificationType.APPLY && applicationId != null) {
+            status = partyApplicationRepository.findById(applicationId)
+                    .map(app -> app.getStatus().name())
+                    .orElse(null);
+        }
 
-            sendNotification(emitter, eventId, key, "notification", NotificationResponse.from(notification));
+        NotificationResponse response = NotificationResponse.from(notification, status);
+
+        emitters.forEach((key, emitter) -> {
+            emitterRepository.saveEventCache(key, response);
+
+            sendNotification(emitter, eventId, key, "notification", response);
         });
     }
 
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(Long userId, Pageable pageable) {
-        Page<Notification> notificationPage = notificationRepository.findAllByUserIdOrderByCreatedAtDesc(userId, pageable);
-
-        return notificationPage.map(notification -> {
-            String status = null;
-
-            if (notification.getNotificationType() == NotificationType.APPLY && notification.getApplicationId() != null) {
-                status = partyApplicationRepository.findById(notification.getApplicationId())
-                        .map(app -> app.getStatus().name())
-                        .orElse(null);
-            }
-
-            return NotificationResponse.from(notification, status);
-        });
+        return notificationRepository.findAllByUserIdAndIsDeletedFalseOrderByCreatedAtDesc(userId, pageable)
+                .map(notification -> {
+                    String status = null;
+                    if (notification.getNotificationType() == NotificationType.APPLY && notification.getApplicationId() != null) {
+                        status = partyApplicationRepository.findById(notification.getApplicationId())
+                                .map(app -> app.getStatus().name())
+                                .orElse(null);
+                    }
+                    return NotificationResponse.from(notification, status);
+                });
     }
 
     @Transactional

@@ -54,6 +54,10 @@ public class PartyApplication extends BaseEntity {
         this.status = ApplicationStatus.REJECTED;
     }
 
+    public void cancel() {
+        this.status = ApplicationStatus.CANCELLED;
+    }
+
     public boolean isApproved() {
         return this.status == ApplicationStatus.APPROVED;
     }
