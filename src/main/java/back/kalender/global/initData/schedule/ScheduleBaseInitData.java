@@ -2,6 +2,10 @@ package back.kalender.global.initData.schedule;
 
 import back.kalender.domain.artist.entity.Artist;
 import back.kalender.domain.artist.repository.ArtistRepository;
+import back.kalender.domain.performance.performance.entity.Performance;
+import back.kalender.domain.performance.performance.repository.PerformanceRepository;
+import back.kalender.domain.performance.schedule.entity.PerformanceSchedule;
+import back.kalender.domain.performance.schedule.repository.PerformanceScheduleRepository;
 import back.kalender.domain.schedule.entity.Schedule;
 import back.kalender.domain.schedule.enums.ScheduleCategory;
 import back.kalender.domain.schedule.repository.ScheduleRepository;
@@ -9,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -17,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Component
@@ -29,6 +37,9 @@ public class ScheduleBaseInitData implements ApplicationRunner {
 
     private final ArtistRepository artistRepository;
     private final ScheduleRepository scheduleRepository;
+    private final PerformanceRepository performanceRepository;
+    private final PerformanceScheduleRepository performanceScheduleRepository;
+    private final CacheManager cacheManager;
     private final Random random = new Random();
 
     private static final List<String> FAN_SIGN_LOCATIONS = List.of(
@@ -59,6 +70,13 @@ public class ScheduleBaseInitData implements ApplicationRunner {
             "서울가요대상", "방콕 라자망갈라 스타디움"
     );
 
+    private static final Map<String, LocalDateTime> TICKETING_CONCERTS = Map.of(
+            "BTS", LocalDateTime.of(2026, 1, 7, 19, 0),
+            "NCT WISH", LocalDateTime.of(2026, 5, 17, 19, 0),
+            "aespa", LocalDateTime.of(2026, 6, 13, 19, 0),
+            "BLACKPINK", LocalDateTime.of(2026, 7, 11, 19, 0)
+    );
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
@@ -76,12 +94,23 @@ public class ScheduleBaseInitData implements ApplicationRunner {
 
         manageAnniversaries(artists);
 
+        evictScheduleCaches();
+
         log.info("Schedule 데이터 정합성 맞춤 및 업데이트 완료");
     }
 
+    private void evictScheduleCaches() {
+        for (String cacheName : List.of("scheduleByArtists", "scheduleFollowing")) {
+            Cache cache = cacheManager.getCache(cacheName);
+            if (cache != null) {
+                cache.clear();
+                log.info("[Cache] {} 캐시 전체 비움 (InitData)", cacheName);
+            }
+        }
+    }
+
     private void fixAndDeduplicateConcerts() {
-        fixSingleConcert("BTS", LocalDateTime.of(2026, 1, 7, 19, 0));
-        fixSingleConcert("NCT WISH", LocalDateTime.of(2026, 1, 9, 18, 0));
+        TICKETING_CONCERTS.forEach(this::fixSingleConcert);
     }
 
     private void fixSingleConcert(String artistName, LocalDateTime fixedDate) {
@@ -90,37 +119,72 @@ public class ScheduleBaseInitData implements ApplicationRunner {
                     artist.getId(), ScheduleCategory.CONCERT
             );
 
+            Performance performance = performanceRepository.findFirstByArtistId(artist.getId()).orElse(null);
+            Long linkedPerformanceId = performance != null ? performance.getId() : null;
+
             if (concerts.isEmpty()) {
-                createDetailSchedule(artist, ScheduleCategory.CONCERT, fixedDate, 0, 0);
-                log.info("{} 콘서트가 없어 새로 생성했습니다.", artistName);
+                createDetailSchedule(artist, ScheduleCategory.CONCERT, fixedDate, 0, 0, linkedPerformanceId);
+                log.info("{} 콘서트가 없어 새로 생성했습니다. (performanceId={})", artistName, linkedPerformanceId);
             } else {
-                Schedule mainConcert = concerts.get(0);
+                Schedule mainConcert = concerts.stream()
+                        .filter(s -> s.getPerformanceId() != null)
+                        .findFirst()
+                        .orElse(concerts.get(0));
+
                 mainConcert.changeScheduleTime(fixedDate);
 
                 DetailInfo info = generateDetailInfo(artistName, ScheduleCategory.CONCERT);
                 mainConcert.updateInfo(info.title, info.location);
 
-                if (concerts.size() > 1) {
-                    for (int i = 1; i < concerts.size(); i++) {
-                        scheduleRepository.delete(concerts.get(i));
-                    }
-                    log.info("{}의 중복 콘서트 {}개를 삭제했습니다.", artistName, concerts.size() - 1);
+                if (mainConcert.getPerformanceId() == null && linkedPerformanceId != null) {
+                    mainConcert.linkPerformance(linkedPerformanceId);
+                    log.info("{} 콘서트에 performanceId={} 링크 복구", artistName, linkedPerformanceId);
                 }
+
+                List<Schedule> duplicates = concerts.stream()
+                        .filter(s -> !s.getId().equals(mainConcert.getId()))
+                        .toList();
+                if (!duplicates.isEmpty()) {
+                    scheduleRepository.deleteAll(duplicates);
+                    log.info("{}의 중복 콘서트 {}개를 삭제했습니다.", artistName, duplicates.size());
+                }
+            }
+
+            if (performance != null) {
+                syncPerformanceWithSchedule(performance, fixedDate.toLocalDate());
             }
         });
     }
 
+    private void syncPerformanceWithSchedule(Performance performance, java.time.LocalDate concertDate) {
+        LocalDateTime salesStart = concertDate.minusDays(60).atTime(10, 0);
+        LocalDateTime salesEnd = concertDate.minusDays(1).atTime(23, 59);
+        performance.updateBookingWindow(concertDate, concertDate, salesStart, salesEnd);
+
+        List<PerformanceSchedule> schedules = performanceScheduleRepository.findByPerformanceId(performance.getId());
+        for (PerformanceSchedule ps : schedules) {
+            ps.changePerformanceDate(concertDate);
+        }
+        log.info("Performance(id={}) 날짜 {} 동기화, 회차 {}개 갱신", performance.getId(), concertDate, schedules.size());
+    }
+
     private void deleteUnwantedConcerts() {
         LocalDateTime start = LocalDateTime.of(2026, 2, 1, 0, 0);
-        LocalDateTime end = LocalDateTime.of(2026, 7, 1, 0, 0);
+        LocalDateTime end = LocalDateTime.of(2026, 8, 1, 0, 0);
+
+        Set<Long> whitelistedArtistIds = TICKETING_CONCERTS.keySet().stream()
+                .map(name -> artistRepository.findByName(name).map(Artist::getId).orElse(null))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
 
         List<Schedule> unwantedConcerts = scheduleRepository.findAllByScheduleTimeBetween(start, end).stream()
                 .filter(s -> s.getScheduleCategory() == ScheduleCategory.CONCERT)
+                .filter(s -> !whitelistedArtistIds.contains(s.getArtistId()))
                 .toList();
 
         if (!unwantedConcerts.isEmpty()) {
             scheduleRepository.deleteAll(unwantedConcerts);
-            log.info("2월 이후의 불필요한 콘서트 데이터 {}건을 삭제했습니다.", unwantedConcerts.size());
+            log.info("티켓팅 아티스트 외 불필요한 콘서트 데이터 {}건을 삭제했습니다.", unwantedConcerts.size());
         }
     }
 
@@ -165,7 +229,7 @@ public class ScheduleBaseInitData implements ApplicationRunner {
             LocalDateTime fixedDebutDate = baseDate.plusDays(uniqueDayOffset);
 
             if (anniversaries.isEmpty()) {
-                createDetailSchedule(artist, ScheduleCategory.ANNIVERSARY, fixedDebutDate, 0, 0);
+                createDetailSchedule(artist, ScheduleCategory.ANNIVERSARY, fixedDebutDate, 0, 0, null);
             } else {
                 Schedule mainAnniversary = anniversaries.get(0);
                 mainAnniversary.changeScheduleTime(fixedDebutDate);
@@ -183,6 +247,10 @@ public class ScheduleBaseInitData implements ApplicationRunner {
     }
 
     private void createDetailSchedule(Artist artist, ScheduleCategory category, LocalDateTime baseDate, int minDay, int maxDay) {
+        createDetailSchedule(artist, category, baseDate, minDay, maxDay, null);
+    }
+
+    private void createDetailSchedule(Artist artist, ScheduleCategory category, LocalDateTime baseDate, int minDay, int maxDay, Long performanceId) {
         int randomDays = minDay + (maxDay > minDay ? random.nextInt(maxDay - minDay + 1) : 0);
         LocalDateTime eventTime = baseDate.plusDays(randomDays);
         DetailInfo info = generateDetailInfo(artist.getName(), category);
@@ -190,6 +258,7 @@ public class ScheduleBaseInitData implements ApplicationRunner {
         scheduleRepository.save(
                 Schedule.builder()
                         .artistId(artist.getId())
+                        .performanceId(performanceId)
                         .scheduleCategory(category)
                         .title(info.title)
                         .scheduleTime(eventTime)

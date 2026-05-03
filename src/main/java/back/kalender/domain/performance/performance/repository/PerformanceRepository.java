@@ -10,4 +10,6 @@ import java.util.Optional;
 
 @Repository
 public interface PerformanceRepository extends JpaRepository<Performance, Long> {
+
+    Optional<Performance> findFirstByArtistId(Long artistId);
 }

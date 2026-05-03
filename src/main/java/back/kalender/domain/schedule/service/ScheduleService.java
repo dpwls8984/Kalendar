@@ -15,6 +15,8 @@ import back.kalender.global.exception.ErrorCode;
 import back.kalender.global.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,6 +64,11 @@ public class ScheduleService {
         return artistIds;
     }
 
+    @Cacheable(
+            cacheNames = "scheduleByArtists",
+            condition = "#artistIds != null && !#artistIds.isEmpty()",
+            key = "#year + '-' + #month + ':' + #artistIds.stream().sorted().distinct().toList() + ':' + (#artistId != null ? #artistId : 'all')"
+    )
     public FollowingSchedulesListResponse getSchedulesByArtistIds(
             int year,
             int month,
@@ -103,6 +110,10 @@ public class ScheduleService {
         return new FollowingSchedulesListResponse(monthlyResponses, upcomingResponses);
     }
 
+    @Cacheable(
+            cacheNames = "scheduleFollowing",
+            key = "#userId + ':' + #year + '-' + #month + ':' + (#artistId != null ? #artistId : 'all')"
+    )
     public FollowingSchedulesListResponse getFollowingSchedules(
             Long userId, int year, int month, Long artistId
     ) {
@@ -233,6 +244,7 @@ public class ScheduleService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "scheduleFollowing", allEntries = true)
     public void toggleScheduleAlarm(Long userId, Long scheduleId) {
         scheduleAlarmRepository.findByScheduleIdAndUserId(scheduleId, userId)
                 .ifPresentOrElse(

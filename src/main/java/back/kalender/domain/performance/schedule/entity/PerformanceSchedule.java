@@ -30,4 +30,7 @@ public class PerformanceSchedule extends BaseEntity {
     @Column(length = 20)
     private ScheduleStatus status;
 
+    public void changePerformanceDate(LocalDate performanceDate) {
+        this.performanceDate = performanceDate;
+    }
 }

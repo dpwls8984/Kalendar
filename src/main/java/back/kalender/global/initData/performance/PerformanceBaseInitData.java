@@ -16,6 +16,8 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -27,6 +29,7 @@ import java.util.Set;
 @Profile({"prod", "dev"})
 @Order(2)
 @RequiredArgsConstructor
+@Slf4j
 public class PerformanceBaseInitData implements ApplicationRunner {
 
     private final ArtistRepository artistRepository;
@@ -39,24 +42,49 @@ public class PerformanceBaseInitData implements ApplicationRunner {
     );
 
     private static final Map<String, String> PERFORMANCE_POSTER_URL = Map.of(
-            "aespa", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/aespa.png",
-            "BTS", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/bts.png",
-            "fromis_9", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/fromis9.png",
-            "G-DRAGON", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/gdragon.png",
-            "NCT WISH", "https://wya-kalendar-poster-images-v2.s3.ap-northeast-2.amazonaws.com/nctwish.png"
+            "aespa", "/posters/aespa.png",
+            "BTS", "/posters/bts.png",
+            "fromis_9", "/posters/fromis9.png",
+            "G-DRAGON", "/posters/gdragon.png",
+            "NCT WISH", "/posters/nctwish.png"
     );
 
     private static final LocalDate PERFORMANCE_START_DATE = LocalDate.of(2026, 1, 15);
     private static final LocalDate PERFORMANCE_END_DATE   = LocalDate.of(2026, 1, 31);
 
     @Override
+    @Transactional
     public void run(ApplicationArguments args) {
 
-        if (performanceRepository.count() > 0) return;
+        if (performanceRepository.count() > 0) {
+            refreshPosterUrls();
+            return;
+        }
 
         for (Artist artist : artistRepository.findAll()) {
             if (!TARGET.contains(artist.getName())) continue;
             createPerformance(artist);
+        }
+    }
+
+    private void refreshPosterUrls() {
+        int updated = 0;
+        for (Performance performance : performanceRepository.findAll()) {
+            String artistName = artistRepository.findById(performance.getArtistId())
+                    .map(Artist::getName)
+                    .orElse(null);
+            if (artistName == null) continue;
+
+            String expectedUrl = PERFORMANCE_POSTER_URL.get(artistName);
+            if (expectedUrl == null) continue;
+
+            if (!expectedUrl.equals(performance.getPosterImageUrl())) {
+                performance.updatePosterImageUrl(expectedUrl);
+                updated++;
+            }
+        }
+        if (updated > 0) {
+            log.info("Performance 포스터 URL {}건 갱신", updated);
         }
     }
 

@@ -45,4 +45,8 @@ public class Schedule extends BaseEntity {
         this.title = title;
         this.location = location;
     }
+
+    public void linkPerformance(Long performanceId) {
+        this.performanceId = performanceId;
+    }
 }
