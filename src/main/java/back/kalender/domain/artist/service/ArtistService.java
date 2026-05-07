@@ -8,7 +8,6 @@ import back.kalender.domain.user.repository.UserRepository;
 import back.kalender.global.exception.ErrorCode;
 import back.kalender.global.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,7 +43,6 @@ public class ArtistService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "scheduleFollowing", allEntries = true)
     public void followArtist(Long userId, Long artistId) {
 
         if (!artistRepository.existsById(artistId)) {
@@ -59,7 +57,6 @@ public class ArtistService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "scheduleFollowing", allEntries = true)
     public void unfollowArtist(Long userId, Long artistId) {
 
         if (!artistFollowRepository.existsByUserIdAndArtistId(userId, artistId)) {

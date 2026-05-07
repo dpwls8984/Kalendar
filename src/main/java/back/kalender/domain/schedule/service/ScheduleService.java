@@ -4,6 +4,7 @@ import back.kalender.domain.artist.entity.Artist;
 import back.kalender.domain.artist.entity.ArtistFollow;
 import back.kalender.domain.artist.repository.ArtistFollowRepository;
 import back.kalender.domain.artist.repository.ArtistRepository;
+import back.kalender.domain.artist.service.ArtistCacheService;
 import back.kalender.domain.schedule.dto.response.*;
 import back.kalender.domain.schedule.entity.Schedule;
 import back.kalender.domain.schedule.entity.ScheduleAlarm;
@@ -15,8 +16,6 @@ import back.kalender.global.exception.ErrorCode;
 import back.kalender.global.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +38,9 @@ public class ScheduleService {
     private final ArtistFollowRepository artistFollowRepository;
     private final ArtistRepository artistRepository;
     private final ScheduleAlarmRepository scheduleAlarmRepository;
+    private final ScheduleCacheService scheduleCacheService;
+    private final UserAlarmCacheService userAlarmCacheService;
+    private final ArtistCacheService artistCacheService;
 
     private static final int PARTY_AVAILABLE_DAYS = 31;
     private static final List<ScheduleCategory> PARTY_CATEGORIES = List.of(
@@ -64,11 +66,6 @@ public class ScheduleService {
         return artistIds;
     }
 
-    @Cacheable(
-            cacheNames = "scheduleByArtists",
-            condition = "#artistIds != null && !#artistIds.isEmpty()",
-            key = "#year + '-' + #month + ':' + #artistIds.stream().sorted().distinct().toList() + ':' + (#artistId != null ? #artistId : 'all')"
-    )
     public FollowingSchedulesListResponse getSchedulesByArtistIds(
             int year,
             int month,
@@ -93,10 +90,10 @@ public class ScheduleService {
             );
         }
 
-        List<Schedule> monthlySchedules = fetchMonthlySchedules(targetArtistIds, year, month);
-        List<Schedule> upcomingSchedules = fetchUpcomingSchedules(targetArtistIds);
+        List<Schedule> monthlySchedules = aggregateMonthlySchedules(targetArtistIds, year, month);
+        List<Schedule> upcomingSchedules = aggregateUpcomingSchedules(targetArtistIds);
 
-        log.info("[Schedule][Guest] DB 조회 결과 - monthly: {}건, upcoming: {}건",
+        log.info("[Schedule][Guest] 합산 결과 - monthly: {}건, upcoming: {}건",
                 monthlySchedules.size(), upcomingSchedules.size());
 
         Map<Long, Artist> artistMap = buildArtistMap(monthlySchedules, upcomingSchedules);
@@ -110,10 +107,6 @@ public class ScheduleService {
         return new FollowingSchedulesListResponse(monthlyResponses, upcomingResponses);
     }
 
-    @Cacheable(
-            cacheNames = "scheduleFollowing",
-            key = "#userId + ':' + #year + '-' + #month + ':' + (#artistId != null ? #artistId : 'all')"
-    )
     public FollowingSchedulesListResponse getFollowingSchedules(
             Long userId, int year, int month, Long artistId
     ) {
@@ -125,11 +118,11 @@ public class ScheduleService {
             return new FollowingSchedulesListResponse(Collections.emptyList(), Collections.emptyList());
         }
 
-        List<Schedule> monthlySchedules = fetchMonthlySchedules(targetArtistIds, year, month);
-        List<Schedule> upcomingSchedules = fetchUpcomingSchedules(targetArtistIds);
-        log.info("[Schedule] DB 조회 결과 - monthly: {}건, upcoming: {}건", monthlySchedules.size(), upcomingSchedules.size());
+        List<Schedule> monthlySchedules = aggregateMonthlySchedules(targetArtistIds, year, month);
+        List<Schedule> upcomingSchedules = aggregateUpcomingSchedules(targetArtistIds);
+        log.info("[Schedule] 합산 결과 - monthly: {}건, upcoming: {}건", monthlySchedules.size(), upcomingSchedules.size());
 
-        Set<Long> alarmedScheduleIds = scheduleAlarmRepository.findScheduleIdsByUserId(userId);
+        Set<Long> alarmedScheduleIds = userAlarmCacheService.findAlarmedScheduleIds(userId);
 
         Map<Long, Artist> artistMap = buildArtistMap(monthlySchedules, upcomingSchedules);
 
@@ -137,6 +130,14 @@ public class ScheduleService {
         List<UpcomingEventResponse> upcomingResponses = mapToUpcomingResponses(upcomingSchedules, artistMap, alarmedScheduleIds);
 
         return new FollowingSchedulesListResponse(monthlyResponses, upcomingResponses);
+    }
+
+    private List<Schedule> aggregateMonthlySchedules(List<Long> artistIds, int year, int month) {
+        return scheduleCacheService.findMonthlyByArtists(artistIds, year, month);
+    }
+
+    private List<Schedule> aggregateUpcomingSchedules(List<Long> artistIds) {
+        return scheduleCacheService.findUpcomingByArtists(artistIds);
     }
 
     public EventsListResponse getEventLists(Long userId) {
@@ -208,18 +209,18 @@ public class ScheduleService {
                 list2.stream().map(Schedule::getArtistId)
         ).distinct().toList();
 
-        return artistRepository.findAllById(allIds).stream()
-                .collect(Collectors.toMap(Artist::getId, artist -> artist));
+        return artistCacheService.filterByIds(allIds);
     }
 
     private List<ScheduleResponse> mapToMonthlyResponses(List<Schedule> schedules, Map<Long, Artist> artistMap, Set<Long> alarmedScheduleIds) {
         return schedules.stream()
                 .map(schedule -> {
                     Artist artist = artistMap.get(schedule.getArtistId());
+                    if (artist == null) return null;
                     boolean isAlarmOn = alarmedScheduleIds.contains(schedule.getId());
-
                     return ScheduleResponseMapper.toScheduleResponse(schedule, artist, isAlarmOn);
                 })
+                .filter(Objects::nonNull)
                 .toList();
     }
 
@@ -228,9 +229,11 @@ public class ScheduleService {
         return schedules.stream()
                 .map(schedule -> {
                     Artist artist = artistMap.get(schedule.getArtistId());
+                    if (artist == null) return null;
                     boolean isAlarmOn = alarmedScheduleIds.contains(schedule.getId());
                     return ScheduleResponseMapper.toUpcomingEventResponse(schedule, artist, today, isAlarmOn);
                 })
+                .filter(Objects::nonNull)
                 .toList();
     }
 
@@ -244,12 +247,12 @@ public class ScheduleService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "scheduleFollowing", allEntries = true)
     public void toggleScheduleAlarm(Long userId, Long scheduleId) {
         scheduleAlarmRepository.findByScheduleIdAndUserId(scheduleId, userId)
                 .ifPresentOrElse(
                         scheduleAlarmRepository::delete,
                         () -> scheduleAlarmRepository.save(new ScheduleAlarm(scheduleId, userId))
                 );
+        userAlarmCacheService.evict(userId);
     }
 }

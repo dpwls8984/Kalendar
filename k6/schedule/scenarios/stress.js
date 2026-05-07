@@ -45,9 +45,9 @@ export const options = {
     },
   },
   thresholds: {
-    'http_req_failed': [{ threshold: 'rate<0.05', abortOnFail: true, delayAbortEval: '30s' }],
-    'http_req_duration{endpoint:by-artists}': [{ threshold: 'p(95)<300', abortOnFail: true, delayAbortEval: '30s' }],
-    'http_req_duration{endpoint:following}':  [{ threshold: 'p(95)<300', abortOnFail: true, delayAbortEval: '30s' }],
+    'http_req_failed': ['rate<0.05'],
+    'http_req_duration{endpoint:by-artists}': ['p(95)<300'],
+    'http_req_duration{endpoint:following}':  ['p(95)<300'],
   },
 };
 

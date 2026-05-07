@@ -100,7 +100,7 @@ public class ScheduleBaseInitData implements ApplicationRunner {
     }
 
     private void evictScheduleCaches() {
-        for (String cacheName : List.of("scheduleByArtists", "scheduleFollowing")) {
+        for (String cacheName : List.of("scheduleByArtist:monthly", "scheduleByArtist:upcoming", "userAlarms", "artistInfo")) {
             Cache cache = cacheManager.getCache(cacheName);
             if (cache != null) {
                 cache.clear();
@@ -195,6 +195,9 @@ public class ScheduleBaseInitData implements ApplicationRunner {
         List<Schedule> legacySchedules = scheduleRepository.findAllByScheduleTimeBetween(start, end);
 
         for (Schedule schedule : legacySchedules) {
+            if (schedule.getTitle() != null && schedule.getTitle().startsWith("[LoadTest]")) {
+                continue;
+            }
             String artistName = artistNameMap.getOrDefault(schedule.getArtistId(), "Artist");
             DetailInfo info = generateDetailInfo(artistName, schedule.getScheduleCategory());
             schedule.updateInfo(info.title, info.location);
